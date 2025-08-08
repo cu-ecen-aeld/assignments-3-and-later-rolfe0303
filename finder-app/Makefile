@@ -1,5 +1,4 @@
 # Define variables
-CROSS_COMPILE ?=
 CC=$(CROSS_COMPILE)gcc
 CFLAGS= -Wall
 TARGET= writer
