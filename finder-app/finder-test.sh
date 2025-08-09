@@ -10,11 +10,7 @@ WRITESTR=AELD_IS_FUN
 WRITEDIR=/tmp/aeld-data
 username=$(cat conf/username.txt)
 
-#Clean previous build artifacts
-make clean
 
-#Build the app
-make
 
 if [ $# -lt 3 ]
 then
