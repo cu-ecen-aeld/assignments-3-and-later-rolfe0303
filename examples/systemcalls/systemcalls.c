@@ -1,4 +1,9 @@
 #include "systemcalls.h"
+#include "stdlib.h"
+#include "fcntl.h"
+#include "unistd.h"
+#include "sys/types.h"
+#include "sys/wait.h"
 
 /**
  * @param cmd the command to execute with system()
@@ -16,7 +21,14 @@ bool do_system(const char *cmd)
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
 */
+    int sys_ret;
 
+    sys_ret = system(cmd);
+
+    if(sys_ret != 0)
+    {
+        return false;
+    }
     return true;
 }
 
@@ -36,6 +48,7 @@ bool do_system(const char *cmd)
 
 bool do_exec(int count, ...)
 {
+    bool retval = false;
     va_list args;
     va_start(args, count);
     char * command[count+1];
@@ -58,10 +71,51 @@ bool do_exec(int count, ...)
  *   as second argument to the execv() command.
  *
 */
+    int status = 0;
+    int ret_pid = 0;
+    fflush(stdout);
+    int pid = fork();
+
+    if(pid < 0)
+    {
+        // Error
+        retval = false;
+    }
+    else if(pid > 0)
+    {
+        // Parent waits
+        ret_pid = waitpid(pid, &status, 0);
+    }
+    else
+    {
+
+        // Child executes
+        execv(command[0], command);
+        // execv only returns if error
+        //printf("Child is returning with error\r\n");
+        exit(EXIT_FAILURE);
+    }
+    if (ret_pid == -1)
+    {
+        // Error on waitpid
+        retval = false;
+    }
+    else
+    {
+        if(WIFEXITED(status) && (WEXITSTATUS(status) == 0))
+        {
+            retval = true;
+        }
+        else
+        {
+            retval = false;
+        }
+    }
+
 
     va_end(args);
-
-    return true;
+    //printf("Retval is: %d\r\n", retval);
+    return retval;
 }
 
 /**
@@ -92,8 +146,56 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
+    bool retval = false;
+    int status = 0;
+    int ret_pid = 0;
+
+    int fd = open(outputfile, O_RDWR | O_CREAT, 0644);
+    if(fd < 0)
+    {
+        // Error hapened when opening the file
+        return false;
+    }
+
+    int pid = fork();
+
+
+    if(pid < 0)
+    {
+        // Error
+        retval = false;
+    }
+    else if(pid > 0)
+    {
+        // Parent waits
+        ret_pid = waitpid(pid, &status, 0);
+        close(fd);
+    }
+    else
+    {
+        if(dup2(fd, STDOUT_FILENO) < 0)
+        {
+            // Error duplicating the file
+            close(fd);
+            exit(EXIT_FAILURE);
+        }
+        // Child executes
+        execv(command[0], command);
+        // execv only returns if error
+        exit(EXIT_FAILURE);
+    }
+
+    if(ret_pid == -1)
+    {
+        // Error on waitpid
+        retval = false;
+    }
+    else
+    {
+        retval = true;
+    }
 
     va_end(args);
 
-    return true;
+    return retval;
 }
