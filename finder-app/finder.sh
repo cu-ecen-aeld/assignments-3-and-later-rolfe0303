@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # Script to find files which match given string
 
 # Files directory
