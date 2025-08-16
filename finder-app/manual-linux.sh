@@ -34,12 +34,34 @@ if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
     echo "Checking out version ${KERNEL_VERSION}"
     git checkout ${KERNEL_VERSION}
 
-    # Clean configuration
-    make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} mrproper
-    # Default configuration
-    make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} defconfig
+    # Workaround for gitlab actions issue
+    # Explanation: When cleaning kernel configuration and applying default configuration
+    # everything works good on local, but for some reason, when running on gitlab actions 
+    # it throws an error when applying defconfig.
+    # This workaround takes a .config file from the finder-app/config directory, if this
+    # files doesn't exist, then creates it.
+    # This way, when running for first time on local, it will generate the file, that will 
+    # be added to the repository, so when running on gitlab actions, it will take the
+    # pre-generated .config file.
+
+    if [ -f ${FINDER_APP_DIR}/conf/.config ]
+    then
+    echo "Copying existing .config file from ${FINDER_APP_DIR}/conf/"
+        # Copy config file
+        cp ${FINDER_APP_DIR}/conf/.config ./.config
     
-    # If any extra kernel configurations needed, this is a good point to configure them
+    else
+        echo "No pre-generated .config file found, clean and apply configuration"
+        # Clean configuration
+        make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} mrproper
+        # Default configuration
+        make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} defconfig
+        
+        # If any extra kernel configurations needed, this is a good point to configure them
+
+        echo "Copying generated .config file to ${FINDER_APP_DIR}/conf/"
+        cp .config ${FINDER_APP_DIR}/conf/.config
+    fi
 
     # Compile the kernel
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} all
