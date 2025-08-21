@@ -7,7 +7,7 @@ set -u
 
 OUTDIR=/tmp/aeld
 KERNEL_REPO=git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
-KERNEL_VERSION=v5.16
+KERNEL_VERSION=v5.15.163
 BUSYBOX_VERSION=1_33_1
 FINDER_APP_DIR=$(realpath $(dirname $0))
 ARCH=arm64
@@ -39,6 +39,8 @@ if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
 
     echo "Cleaning kernel config"
     # Clean configuration
+    echo "command to run:"
+    echo "make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} mrproper"
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} mrproper
     echo "Configuring kernel"
     # Default configuration
