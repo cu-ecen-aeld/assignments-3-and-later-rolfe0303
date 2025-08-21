@@ -21,6 +21,9 @@ else
 	echo "Using passed directory ${OUTDIR} for output"
 fi
 
+echo "Show compiler path"
+echo $(which ${CROSS_COMPILE}gcc)
+
 mkdir -p ${OUTDIR}
 
 cd "$OUTDIR"
@@ -34,29 +37,31 @@ if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
     echo "Checking out version ${KERNEL_VERSION}"
     git checkout ${KERNEL_VERSION}
 
+    echo "Cleaning kernel config"
     # Clean configuration
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} mrproper
+    echo "Configuring kernel"
     # Default configuration
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} defconfig
     
     # If any extra kernel configurations needed, this is a good point to configure them
 
+    echo "Building kernel image"
     # Compile the kernel
-    make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} all
+    make -j4 ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} all
     # Compile modules
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} modules
     # Build the device tree
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} dtbs
 
-    echo "Copying output files to ${OUTDIR}"
-    # Copy output files to outdir
-    cd ${OUTDIR}/linux-stable/arch/${ARCH}/boot/
-    cp Image ${OUTDIR}
-    #cp zImage ${OUTDIR}
-    #cp uImage ${OUTDIR}
 fi
 
 echo "Adding the Image in outdir"
+# Copy output files to outdir
+cd ${OUTDIR}/linux-stable/arch/${ARCH}/boot/
+cp Image ${OUTDIR}
+#cp zImage ${OUTDIR}
+#cp uImage ${OUTDIR}
 
 echo "Creating the staging directory for the root filesystem"
 cd "$OUTDIR"
