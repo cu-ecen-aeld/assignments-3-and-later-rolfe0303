@@ -21,8 +21,11 @@ else
 	echo "Using passed directory ${OUTDIR} for output"
 fi
 
-echo "Show compiler path"
+echo "Show tools paths"
 echo $(which ${CROSS_COMPILE}gcc)
+echo $(which bison)
+echo $(which m4)
+
 
 mkdir -p ${OUTDIR}
 
