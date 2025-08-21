@@ -25,6 +25,7 @@ echo "Show tools paths"
 echo $(which ${CROSS_COMPILE}gcc)
 echo $(which bison)
 echo $(which m4)
+echo $PATH
 
 
 mkdir -p ${OUTDIR}
