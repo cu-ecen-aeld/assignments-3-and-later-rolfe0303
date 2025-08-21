@@ -24,7 +24,9 @@ fi
 echo "Show tools paths"
 echo $(which ${CROSS_COMPILE}gcc)
 echo $(which bison)
+bison --version
 echo $(which m4)
+m4 --version
 echo $PATH
 
 
