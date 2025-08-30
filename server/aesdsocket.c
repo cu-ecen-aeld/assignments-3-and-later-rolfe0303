@@ -11,13 +11,20 @@
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <signal.h>
 
-//#define DEBUG_LOG(msg,...)
-#define DEBUG_LOG(msg,...) printf("aesdsocket: " msg "\n" , ##__VA_ARGS__)
+#define DEBUG_LOG(msg,...)
+//#define DEBUG_LOG(msg,...) printf("aesdsocket: " msg "\n" , ##__VA_ARGS__)
 #define ERROR_LOG(msg,...) printf("aesdsocket ERROR: " msg "\n" , ##__VA_ARGS__)
 
 #define PATH_TO_FILE "/var/tmp/aesdsocketdata"
 #define BUFFER_SIZE 1024
+
+
+static void sigHandler(int signo);
+
+
+bool signal_catched = false;
 
 
 int main(int argc, char* argv[])
@@ -36,6 +43,12 @@ int main(int argc, char* argv[])
     char* buffer = NULL;
     char write_buff[BUFFER_SIZE] = {0};
     ssize_t file_size = 0;
+
+    // Signal handling
+    struct sigaction custom_action;
+    custom_action.sa_handler = sigHandler;
+
+    memset(&custom_action, 0, sizeof(custom_action));
 
     // Start syslog
     openlog(NULL, 0, LOG_USER);
@@ -95,7 +108,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    while (1)
+    while (signal_catched == false)
     {
         if(!error)
         {
@@ -264,7 +277,19 @@ int main(int argc, char* argv[])
         }
     }
 
+    if(signal_catched)
+    {
+        // Remove the file
+        remove(PATH_TO_FILE);
+    }
+
     // Free allocated memory
     freeaddrinfo(res);
     return ret_code;
+}
+
+
+static void sigHandler(int signo)
+{
+    signal_catched = true;
 }
