@@ -13,9 +13,16 @@
 #include <unistd.h>
 #include <signal.h>
 
-#define DEBUG_LOG(msg,...)
-//#define DEBUG_LOG(msg,...) printf("aesdsocket: " msg "\n" , ##__VA_ARGS__)
+#define DEBUG 1
+
+#if (DEBUG == 1)
+#define DEBUG_LOG(msg,...) printf("aesdsocket: " msg "\n" , ##__VA_ARGS__)
 #define ERROR_LOG(msg,...) printf("aesdsocket ERROR: " msg "\n" , ##__VA_ARGS__)
+#else
+#define DEBUG_LOG(msg,...)
+#define ERROR_LOG(msg,...)
+#endif
+
 
 #define PATH_TO_FILE "/var/tmp/aesdsocketdata"
 #define BUFFER_SIZE 1024
@@ -34,34 +41,30 @@ int main(int argc, char* argv[])
     int new_fd;
     struct sockaddr client_addr;
     socklen_t pClientAddrLen = sizeof(client_addr);
+    char connection_info[pClientAddrLen];
     const char* pRetInfo;
     bool error = false, connected = false;
-    int rc = 0, byte_count = 0, sent_bytes = 0;
+    int rc = 0;
+    ssize_t rc2 = 0,byte_count = 0, sent_bytes = 0;
     int ret_code = 0;
-    int filedesc;
+    int filedesc = -1;
     int buffer_size;
     char* buffer = NULL;
     char write_buff[BUFFER_SIZE] = {0};
     ssize_t file_size = 0;
+    int socketfd;
 
     // Signal handling
     struct sigaction custom_action;
+    memset(&custom_action, 0, sizeof(custom_action));
     custom_action.sa_handler = sigHandler;
 
-    memset(&custom_action, 0, sizeof(custom_action));
+    sigaction(SIGINT, &custom_action, NULL);
+    sigaction(SIGTERM, &custom_action, NULL);
+
 
     // Start syslog
     openlog(NULL, 0, LOG_USER);
-    // Create socket endpoint
-    int socketfd = socket(AF_LOCAL, SOCK_STREAM, 0);
-    if(socketfd == -1)
-    {
-        // Error when creating endpoint
-        ERROR_LOG("Error creating socket. Error code is %d", errno);
-        syslog(LOG_USER | LOG_ERR, "Error creating socket");
-        error = true;
-        ret_code = -1;
-    }
 
     // Populate hints
     memset(&hints, 0, sizeof(hints));
@@ -69,19 +72,32 @@ int main(int argc, char* argv[])
     hints.ai_socktype = SOCK_STREAM; // TCP stream sockets
     hints.ai_flags = AI_PASSIVE;     // fill in my IP for me
 
+    rc = getaddrinfo(NULL, "9000", &hints, &res);
+    if(rc != 0)
+    {
+        // Error getting addr info
+        ERROR_LOG("Error creating addrinfo. Error is %d", rc);
+        syslog(LOG_USER | LOG_ERR, "Error creating addrinfo");
+        error = true;
+        ret_code = -1;
+
+    }
+
     if(!error)
     {
-        rc = getaddrinfo(NULL, "9000", &hints, &res);
-        if(rc != 0)
+        // Create socket endpoint
+        //socketfd = socket(AF_LOCAL, SOCK_STREAM, 0);
+        socketfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+        if(socketfd == -1)
         {
-            // Error getting addr info
-            ERROR_LOG("Error creating addrinfo. Error is %d", rc);
-            syslog(LOG_USER | LOG_ERR, "Error creating addrinfo");
+            // Error when creating endpoint
+            ERROR_LOG("Error creating socket. %s", strerror(errno));
+            syslog(LOG_USER | LOG_ERR, "Error creating socket");
             error = true;
             ret_code = -1;
-    
         }
     }
+
 
     if(!error)
     {
@@ -89,7 +105,7 @@ int main(int argc, char* argv[])
         if(rc != 0)
         {
             // Error binding
-            ERROR_LOG("Error binding. Error code is %d", errno);
+            ERROR_LOG("Error binding. %s", strerror(errno));
             syslog(LOG_USER | LOG_ERR, "Error binding");
             error = true;
             ret_code = -1;
@@ -108,7 +124,20 @@ int main(int argc, char* argv[])
         }
     }
 
-    while (signal_catched == false)
+    if(!error)
+    {
+        filedesc = open(PATH_TO_FILE, O_RDWR|O_CREAT|O_APPEND|O_SYNC, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH);
+        if(filedesc < 0)
+        {
+            // Error creating or opening the file
+            ERROR_LOG("Error creating or opening " PATH_TO_FILE);
+            syslog(LOG_USER | LOG_ERR, "Error creating or opening " PATH_TO_FILE);
+            error = true;
+            ret_code = -1;
+        }
+    }
+
+    while (signal_catched == false && !error)
     {
         if(!error)
         {
@@ -116,7 +145,7 @@ int main(int argc, char* argv[])
             if(new_fd < 0)
             {
                 // Error accpeting connection
-                ERROR_LOG("Error Accepting. Error code is %d", errno);
+                ERROR_LOG("Error Accepting. %s", strerror(errno));
                 syslog(LOG_USER | LOG_ERR, "Error accepting connection");
                 error = true;
                 ret_code = -1;
@@ -126,7 +155,6 @@ int main(int argc, char* argv[])
         if(!error)
         {
             // Get connection address info
-            char connection_info[pClientAddrLen];
             pRetInfo = inet_ntop(client_addr.sa_family, client_addr.sa_data, connection_info, pClientAddrLen);
             if(pRetInfo == NULL)
             {
@@ -140,19 +168,6 @@ int main(int argc, char* argv[])
                 connected = true;
                 DEBUG_LOG("Accepted connection from %s", pRetInfo);
                 syslog(LOG_USER | LOG_INFO, "Accepted connection from %s", pRetInfo);
-            }
-        }
-
-        if(!error)
-        {
-            filedesc = open(PATH_TO_FILE, O_CREAT|O_APPEND, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH);
-            if(filedesc < 0)
-            {
-                // Error creating or opening the file
-                ERROR_LOG("Error creating or opening " PATH_TO_FILE);
-                syslog(LOG_USER | LOG_ERR, "Error creating or opening " PATH_TO_FILE);
-                error = true;
-                ret_code = -1;
             }
         }
 
@@ -183,8 +198,8 @@ int main(int argc, char* argv[])
         // Read data from socket
         if(!error)
         {
-            rc = recv(new_fd, buffer, buffer_size, 0);
-            if(rc < 0)
+            rc2 = recv(new_fd, buffer, buffer_size, 0);
+            if(rc2 < 0)
             {
                 // Error receiving
                 ERROR_LOG("Error receiving data from socket");
@@ -192,49 +207,59 @@ int main(int argc, char* argv[])
                 error = true;
                 ret_code = -1;
             }
-            else if (rc > 0)
+            else if (rc2 > 0)
             {
                 // Copy data to file
-                DEBUG_LOG("Writing to file from socket");
-                byte_count = 0;
-                do
+                DEBUG_LOG("Writing to file from socket the text %s", buffer);
+                byte_count = buffer_size;
+                while (byte_count > 0)
                 {
-                    /* code */
-                } while (byte_count > 0);
+                    rc2 = write(filedesc, buffer, buffer_size);
+                    
+                    if(rc2 < 0)
+                    {
+                        // Error writing the file
+                        ERROR_LOG("Error writing the file. %s", strerror(errno));
+                        syslog(LOG_USER | LOG_ERR, "Error writing the file");
+                        error = true;
+                        ret_code = -1;
+                        break;
+                    }
+                    byte_count -= rc2;
+                };
+                DEBUG_LOG("Finished writing");
                 
-                byte_count = write(filedesc, buffer, buffer_size);
-                if(rc < 0)
-                {
-                    // Error writing the file
-                    ERROR_LOG("Error writing the file");
-                    syslog(LOG_USER | LOG_ERR, "Error rwriting the file");
-                    error = true;
-                    ret_code = -1;
-                }
             }
             
         }
         // We ended using the receive buffer
-        free(buffer);
+        if(buffer != NULL)
+        {
+            free(buffer);
+            buffer = NULL;
+        }
         
         // Read size of file
         if(!error)
         {
-            file_size = lseek(filedesc, 0L, SEEK_END);
+            DEBUG_LOG("Reading file size");
+            file_size = (ssize_t)lseek(filedesc, 0L, SEEK_END);
             // Bring offset backto beggining
-            rc = lseek(filedesc, 0L, SEEK_SET);
-            if(rc < 0 || file_size < 0)
-                {
-                    // Error writing the file
-                    ERROR_LOG("Error reading file size");
-                    syslog(LOG_USER | LOG_ERR, "Error reading file size");
-                    error = true;
-                    ret_code = -1;
-                }
+            rc2 = (ssize_t)lseek(filedesc, 0L, SEEK_SET);
+            if(rc2 < 0 || file_size < 0)
+            {
+                // Error writing the file
+                ERROR_LOG("Error reading file size");
+                syslog(LOG_USER | LOG_ERR, "Error reading file size");
+                error = true;
+                ret_code = -1;
+            }
+            DEBUG_LOG("File size is %ld", file_size);
         }
 
         if(!error)
         {
+            DEBUG_LOG("Sending file to socket");
             // Loop to read file and send to socket
             while(file_size > 0)
             {
@@ -248,9 +273,13 @@ int main(int argc, char* argv[])
                     ret_code = -1;
                     break;
                 }
+                else
+                {
+                    DEBUG_LOG("Read %ld bytes", byte_count);
+                }
                 
                 // Copy buffer to socket
-                sent_bytes = send(socketfd, &write_buff, byte_count, 0);
+                sent_bytes = send(new_fd, &write_buff, byte_count, 0);
                 if(sent_bytes < 0)
                 {
                     ERROR_LOG("Error writing to socket");
@@ -259,9 +288,14 @@ int main(int argc, char* argv[])
                     ret_code = -1;
                     break;
                 }
+                else
+                {
+                    DEBUG_LOG("Sent %ld bytes", sent_bytes);
+                }
                 file_size -= sent_bytes;
                 if(byte_count > sent_bytes)
                 {
+                    DEBUG_LOG("Sent less bytes than read, move offset back");
                     // send operation was interrupted, move back index
                     lseek(filedesc, sent_bytes-byte_count, SEEK_SET);
                 }
@@ -277,19 +311,40 @@ int main(int argc, char* argv[])
         }
     }
 
+    if(filedesc != -1)
+    {
+        close(filedesc);
+    }
+
     if(signal_catched)
     {
+        DEBUG_LOG("Signal received, removing file");
         // Remove the file
         remove(PATH_TO_FILE);
     }
 
     // Free allocated memory
-    freeaddrinfo(res);
+    if(res != NULL)
+    {
+        freeaddrinfo(res);
+    }
     return ret_code;
 }
 
 
 static void sigHandler(int signo)
 {
-    signal_catched = true;
+    switch (signo)
+    {
+    case SIGINT:
+        signal_catched = true;
+        break;
+
+    case SIGTERM:
+        signal_catched = true;
+        break;
+    
+    default:
+        break;
+    }
 }
