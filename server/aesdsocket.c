@@ -48,11 +48,35 @@ int main(int argc, char* argv[])
     ssize_t rc2 = 0,byte_count = 0, sent_bytes = 0;
     int ret_code = 0;
     int filedesc = -1;
-    int buffer_size;
-    char* buffer = NULL;
-    char write_buff[BUFFER_SIZE] = {0};
+    char buffer[BUFFER_SIZE] = {0};
     ssize_t file_size = 0;
     int socketfd;
+    bool daemon_mode = false;
+    int send_flags = 0;
+    bool receiving = true;
+
+        // Start syslog
+    openlog(NULL, 0, LOG_USER);
+
+    if(argc == 2)
+    {
+        if(!strcmp(argv[1], "-d"))
+        {
+            DEBUG_LOG("Requested daemon mode");
+            syslog(LOG_USER | LOG_INFO, "Requested daemon mode");
+            daemon_mode = true;
+        }
+        else
+        {
+            ERROR_LOG("Wrong argument. Argument was %s", argv[1]);
+            return -1;
+        }
+    }
+    else if(argc > 2)
+    {
+        ERROR_LOG("Too many arguments");
+        return -1;
+    }
 
     // Signal handling
     struct sigaction custom_action;
@@ -63,12 +87,9 @@ int main(int argc, char* argv[])
     sigaction(SIGTERM, &custom_action, NULL);
 
 
-    // Start syslog
-    openlog(NULL, 0, LOG_USER);
-
     // Populate hints
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;     // IPv4
+    hints.ai_family = AF_UNSPEC;     // IPv4 or IPv6
     hints.ai_socktype = SOCK_STREAM; // TCP stream sockets
     hints.ai_flags = AI_PASSIVE;     // fill in my IP for me
 
@@ -111,9 +132,21 @@ int main(int argc, char* argv[])
             ret_code = -1;
         }
     }
+
+    if(!error && daemon_mode)
+    {
+        DEBUG_LOG("Forking to daemon");
+        int pid = fork();
+        if(pid > 0)
+        {
+            DEBUG_LOG("Daemon is running, parent says goodbye");
+            return 0;
+        }
+    }
+
     if(!error)
     {
-        rc = listen(socketfd, 0);
+        rc = listen(socketfd, 10);
         if(rc != 0)
         {
             // Error listening
@@ -171,74 +204,56 @@ int main(int argc, char* argv[])
             }
         }
 
-        // check size of available data
-        if(!error)
-        {
-            rc = ioctl(new_fd, FIONREAD, &buffer_size);
-            if(rc < 0)
-            {
-                //Error getting size of data available
-                ERROR_LOG("Error getting size of data from socket");
-                syslog(LOG_USER | LOG_ERR, "Error getting size of data from socket");
-                error = true;
-                ret_code = -1;
-            }
-            else
-            {
-                buffer = (char*)malloc(buffer_size);
-                if(buffer == NULL)
-                {
-                    ERROR_LOG("Error: Not enough heap");
-                    syslog(LOG_USER | LOG_ERR, "Error: Not enough heap");
-                    error = true;
-                    ret_code = -1;
-                }
-            }
-        }
         // Read data from socket
         if(!error)
         {
-            rc2 = recv(new_fd, buffer, buffer_size, 0);
-            if(rc2 < 0)
+            receiving = true;
+            while(receiving)
             {
-                // Error receiving
-                ERROR_LOG("Error receiving data from socket");
-                syslog(LOG_USER | LOG_ERR, "Error receiving data from socket");
-                error = true;
-                ret_code = -1;
-            }
-            else if (rc2 > 0)
-            {
-                // Copy data to file
-                DEBUG_LOG("Writing to file from socket the text %s", buffer);
-                byte_count = buffer_size;
-                while (byte_count > 0)
+                rc2 = recv(new_fd, buffer, BUFFER_SIZE, 0);
+                if(rc2 < 0)
                 {
-                    rc2 = write(filedesc, buffer, buffer_size);
-                    
-                    if(rc2 < 0)
+                    // Error receiving
+                    ERROR_LOG("Error receiving data from socket");
+                    syslog(LOG_USER | LOG_ERR, "Error receiving data from socket");
+                    error = true;
+                    ret_code = -1;
+                    receiving = false;
+                    break;
+                }
+                else if (rc2 > 0)
+                {
+                    // Copy data to file
+                    DEBUG_LOG("Writing to file from socket the text %s", buffer);
+                    byte_count = rc2;
+                    while (byte_count > 0)
                     {
-                        // Error writing the file
-                        ERROR_LOG("Error writing the file. %s", strerror(errno));
-                        syslog(LOG_USER | LOG_ERR, "Error writing the file");
-                        error = true;
-                        ret_code = -1;
-                        break;
+                        rc2 = write(filedesc, buffer, byte_count);
+                        
+                        if(rc2 < 0)
+                        {
+                            // Error writing the file
+                            ERROR_LOG("Error writing the file. %s", strerror(errno));
+                            syslog(LOG_USER | LOG_ERR, "Error writing the file");
+                            error = true;
+                            ret_code = -1;
+                            break;
+                        }
+                        byte_count -= rc2;
+                    };
+                    // Check if reception is complete (ends with new line)
+                    if(memchr(buffer, '\n', BUFFER_SIZE) != NULL)
+                    {
+                        receiving = false;
                     }
-                    byte_count -= rc2;
-                };
-                DEBUG_LOG("Finished writing");
-                
+
+                    DEBUG_LOG("Finished writing");
+                    
+                }
             }
             
         }
-        // We ended using the receive buffer
-        if(buffer != NULL)
-        {
-            free(buffer);
-            buffer = NULL;
-        }
-        
+
         // Read size of file
         if(!error)
         {
@@ -264,7 +279,7 @@ int main(int argc, char* argv[])
             while(file_size > 0)
             {
                 // Copy file chunk to buffer
-                byte_count = read(filedesc, &write_buff, BUFFER_SIZE);
+                byte_count = read(filedesc, &buffer, BUFFER_SIZE);
                 if(byte_count < 0)
                 {
                     ERROR_LOG("Error reading from file");
@@ -277,9 +292,20 @@ int main(int argc, char* argv[])
                 {
                     DEBUG_LOG("Read %ld bytes", byte_count);
                 }
+
+                if(file_size > byte_count)
+                {
+                    // There is still more data to send
+                    send_flags = MSG_MORE;
+                }
+                else
+                {
+                    // This is the last chunk of data to transmit
+                    send_flags = 0;
+                }
                 
                 // Copy buffer to socket
-                sent_bytes = send(new_fd, &write_buff, byte_count, 0);
+                sent_bytes = send(new_fd, &buffer, byte_count, send_flags);
                 if(sent_bytes < 0)
                 {
                     ERROR_LOG("Error writing to socket");
@@ -321,6 +347,7 @@ int main(int argc, char* argv[])
         DEBUG_LOG("Signal received, removing file");
         // Remove the file
         remove(PATH_TO_FILE);
+        ret_code = 0;
     }
 
     // Free allocated memory
